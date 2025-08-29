@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Fishiko Application Stack – SageMaker, Lambda, and API Gateway
+
+Parameters:
+  SageMakerInstanceType:
+    Type: String
+    Default: ml.t2.medium
+    AllowedValues: [ml.t2.medium, ml.t3.medium, ml.t3.large, ml.m5.large]
+    Description: SageMaker instance type for endpoint
+  LambdaRuntime:
+    Type: String
+    Default: python3.10
+    Description: Lambda runtime environment
+  EndpointName:
+    Type: String
+    Default: fishiko-endpoint
+    Description: SageMaker endpoint name
+
+Resources:
+  fishikoModel:
+    Type: AWS::SageMaker::Model
+    Properties:
+      ExecutionRoleArn: arn:aws:iam::884665053793:role/LabRole
+      PrimaryContainer:
+        Image: 683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-scikit-learn:1.0-1-cpu-py3
+        ModelDataUrl: s3://fishikostackbase-fishikos3bucket-rtkwt0bf75xy/model.tar.gz
+        Environment:
+          SAGEMAKER_PROGRAM: inference.py
+          SAGEMAKER_SUBMIT_DIRECTORY: /opt/ml/model
+
+  FishikoEndpointConfig:
+    Type: AWS::SageMaker::EndpointConfig
+    Properties:
+      ProductionVariants:
+        - VariantName: AllTraffic
+          ModelName: !GetAtt fishikoModel.ModelName
+          InitialInstanceCount: 1
+          InstanceType: !Ref SageMakerInstanceType
+
+  FishikoEndpoint:
+    Type: AWS::SageMaker::Endpoint
+    Properties:
+      EndpointName: !Ref EndpointName
+      EndpointConfigName: !GetAtt FishikoEndpointConfig.EndpointConfigName
+
+  FishikoLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: FishikoLambda
+      Handler: lambda_function.lambda_handler
+      Role: arn:aws:iam::884665053793:role/LabRole
+      Runtime: !Ref LambdaRuntime
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          ENDPOINT_NAME: !Ref EndpointName
+          TABLE_NAME: FishikoPredictions
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import uuid
+          import os
+          from datetime import datetime
+
+          runtime = boto3.client('sagemaker-runtime')
+          dynamodb = boto3.resource('dynamodb')
+          table_name = os.environ.get('TABLE_NAME', 'FishikoPredictions')
+          endpoint_name = os.environ.get('ENDPOINT_NAME', 'fishiko-endpoint')
+          table = dynamodb.Table(table_name)
+
+          def lambda_handler(event, context):
+              try:
+                  body = json.loads(event['body'])
+                  latitude = body.get('latitude')
+                  longitude = body.get('longitude')
+                  temperature = body['temperature_degree_c']
+                  salinity = body.get('salinity_psu', 32.5)
+                  season = body['season']
+
+                  if latitude and longitude:
+                      lat = float(latitude)
+                      lon = float(longitude)
+                      if not (44.5 <= lat <= 44.8 and -63.7 <= lon <= -63.4):
+                          return {
+                              'statusCode': 400,
+                              'body': json.dumps({'error': 'Coordinates outside Halifax bounds'})
+                          }
+                  else:
+                      lat, lon = None, None
+
+                  payload = {
+                      'temperature_degree_c': temperature,
+                      'salinity_psu': salinity,
+                      'season': season,
+                      'latitude': lat,
+                      'longitude': lon
+                  }
+
+                  response = runtime.invoke_endpoint(
+                      EndpointName=endpoint_name,
+                      ContentType='application/json',
+                      Body=json.dumps(payload)
+                  )
+                  result = json.loads(response['Body'].read().decode())
+
+                  prediction_id = str(uuid.uuid4())
+                  table.put_item(
+                      Item={
+                          'PredictionID': prediction_id,
+                          'latitude': str(lat) if lat else 'N/A',
+                          'longitude': str(lon) if lon else 'N/A',
+                          'temperature': str(temperature),
+                          'salinity': str(salinity),
+                          'season': season,
+                          'predicted_zone': result['predicted_zone'],
+                          'fish_recommendations': ', '.join(result['fish_recommendations']),
+                          'gps_zone': result['gps_zone'],
+                          'timestamp': datetime.utcnow().isoformat()
+                      }
+                  )
+
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(result)
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+
+  FishikoAPI:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: FishikoAPI
+      Description: API for Fishiko fishing zone predictions
+
+  PredictResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref FishikoAPI
+      ParentId: !GetAtt FishikoAPI.RootResourceId
+      PathPart: predict
+
+  PredictMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref FishikoAPI
+      ResourceId: !Ref PredictResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FishikoLambda.Arn}/invocations
+
+  LambdaApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FishikoLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FishikoAPI}/*/POST/predict
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: PredictMethod
+    Properties:
+      RestApiId: !Ref FishikoAPI
+      StageName: prod
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${FishikoAPI}.execute-api.${AWS::Region}.amazonaws.com/prod/predict
+  SageMakerEndpoint:
+    Description: SageMaker endpoint name
+    Value: !Ref FishikoEndpoint
+  LambdaFunction:
+    Description: Lambda function name
+    Value: !Ref FishikoLambda

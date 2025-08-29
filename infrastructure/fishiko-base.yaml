@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Fishiko Base Stack – S3 Bucket and DynamoDB for model preparation
+
+Resources:
+  FishikoS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FishikoPredictionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: FishikoPredictions
+      AttributeDefinitions:
+        - AttributeName: PredictionID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PredictionID
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      SSESpecification:
+        SSEEnabled: true
+
+Outputs:
+  S3Bucket:
+    Description: The S3 bucket to upload model.tar.gz
+    Value: !Ref FishikoS3Bucket
+  DynamoDBTable:
+    Description: DynamoDB table name
+    Value: !Ref FishikoPredictionsTable
