@@ -1,0 +1,20 @@
+{
+  "dev": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-fishikoamplify-dev-7e3f1-authRole",
+      "UnauthRoleArn": "arn:aws:iam::662855374638:role/amplify-fishikoamplify-dev-7e3f1-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::662855374638:role/amplify-fishikoamplify-dev-7e3f1-authRole",
+      "Region": "us-east-1",
+      "DeploymentBucketName": "amplify-fishikoamplify-dev-7e3f1-deployment",
+      "UnauthRoleName": "amplify-fishikoamplify-dev-7e3f1-unauthRole",
+      "StackName": "amplify-fishikoamplify-dev-7e3f1",
+      "StackId": "arn:aws:cloudformation:us-east-1:662855374638:stack/amplify-fishikoamplify-dev-7e3f1/5de98410-3cb4-11f0-a969-0edfb9fb5273",
+      "AmplifyAppId": "d2jlqotsnkbn0j"
+    },
+    "categories": {
+      "auth": {
+        "fishikoamplify8f299181": {}
+      }
+    }
+  }
+}
