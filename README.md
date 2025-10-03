@@ -21,6 +21,14 @@ The platform orchestrates API Gateway, Lambda, DynamoDB, and S3 with a SageMaker
 
 ---
 
+## Architecture
+
+
+<img width="847" height="587" alt="Final_Dia" src="https://github.com/user-attachments/assets/b1d070c4-8072-4d83-b7c8-257e38056111" />
+
+---
+
+
 ## Repository Layout
 
 ```
